@@ -17,7 +17,7 @@ databases:
   - name: outreach-db
     databaseName: outreach
     user: outreach
-    plan: free          # change to "basic-256mb" for production
+    plan: basic-256mb   # $7/mo, no expiry; alternative: "free" (90-day expiry, 1-per-workspace cap)
     region: frankfurt   # closest to UAE; options: oregon, ohio, virginia, frankfurt, singapore
 
 services:
