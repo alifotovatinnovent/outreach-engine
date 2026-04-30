@@ -82,10 +82,14 @@ services:
     plan: free
     region: frankfurt
     rootDir: apps/web
-    buildCommand: npm install && npm run build
+    # NPM_CONFIG_PRODUCTION=false ensures devDeps + transitive build-time deps
+    # (tailwind, postcss, client-only, etc.) are installed for the build.
+    buildCommand: NPM_CONFIG_PRODUCTION=false npm install --include=dev && npm run build
     startCommand: npm start
     autoDeploy: true
     envVars:
+      - key: NPM_CONFIG_PRODUCTION
+        value: "false"
       # Set this after first deploy of outreach-api — paste the full https://... URL
       - key: NEXT_PUBLIC_API_URL
         sync: false
