@@ -1,9 +1,39 @@
 """App configuration loaded from environment variables."""
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _clean_secret(v: str) -> str:
+    """Strip whitespace + reject any non-ASCII chars that snuck in via copy-paste.
+
+    Render env vars sometimes carry hidden arrow chars (→) or smart quotes when
+    pasted from rich-text UIs. httpx will choke on those at header-encode time.
+    """
+    if not v:
+        return v
+    cleaned = v.strip()
+    try:
+        cleaned.encode("ascii")
+    except UnicodeEncodeError:
+        # Drop any non-ASCII char silently. Better to try with what's left
+        # than to fail the entire request later.
+        cleaned = cleaned.encode("ascii", "ignore").decode("ascii")
+    return cleaned
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @field_validator(
+        "anthropic_api_key", "apollo_api_key",
+        "smartlead_api_key", "smartlead_default_campaign_id",
+        "twilio_account_sid", "twilio_auth_token", "twilio_whatsapp_from",
+        "hubspot_token", "pipedrive_api_token",
+        mode="before",
+    )
+    @classmethod
+    def _clean_secrets(cls, v):
+        return _clean_secret(v) if isinstance(v, str) else v
 
     # Required
     anthropic_api_key: str = ""
