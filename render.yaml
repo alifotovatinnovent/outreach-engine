@@ -1,0 +1,93 @@
+# Render Blueprint — deploys all three services in one click.
+# Docs: https://render.com/docs/blueprint-spec
+#
+# After pushing this repo to GitHub:
+#   1. Render → New → Blueprint → connect your GitHub repo
+#   2. Render reads this file and creates the database + 2 services
+#   3. Set the secret env vars when prompted (ANTHROPIC_API_KEY, APOLLO_API_KEY, etc.)
+#   4. After first deploy, set NEXT_PUBLIC_API_URL on outreach-web to the API URL
+#      (e.g., https://outreach-api.onrender.com) and trigger a redeploy
+#
+# Plans:
+#  - Free Postgres: 90-day expiry, then auto-deletes. Upgrade to Basic ($7/mo) before that.
+#  - Free Web Services: spin down after 15 min idle. First request after sleep ~30 sec.
+#  - For production, upgrade web services to Starter ($7/mo each).
+
+databases:
+  - name: outreach-db
+    databaseName: outreach
+    user: outreach
+    plan: free          # change to "basic-256mb" for production
+    region: frankfurt   # closest to UAE; options: oregon, ohio, virginia, frankfurt, singapore
+
+services:
+  # ---------------------------- API (FastAPI) ----------------------------
+  - type: web
+    name: outreach-api
+    runtime: python
+    plan: free          # change to "starter" for production
+    region: frankfurt
+    rootDir: apps/api
+    buildCommand: pip install -e .
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # DB connection auto-wired from the managed Postgres above
+      - key: DATABASE_URL
+        fromDatabase:
+          name: outreach-db
+          property: connectionString
+      # ---- Required secrets (set in Render dashboard, marked sync:false) ----
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: APOLLO_API_KEY
+        sync: false
+      # ---- Optional channel secrets (leave blank to disable that channel) ----
+      - key: SMARTLEAD_API_KEY
+        sync: false
+      - key: SMARTLEAD_FROM_EMAIL
+        sync: false
+      - key: SMARTLEAD_DEFAULT_CAMPAIGN_ID
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_WHATSAPP_FROM
+        sync: false
+      - key: HUBSPOT_TOKEN
+        sync: false
+      - key: PIPEDRIVE_API_TOKEN
+        sync: false
+      - key: PIPEDRIVE_DOMAIN
+        sync: false
+      # ---- Sender identity (committed; not secret) ----
+      - key: SENDER_NAME
+        value: Ali Fotovat
+      - key: SENDER_COMPANY
+        value: INNOVENT Tech
+      - key: SENDER_ROLE
+        value: CEO
+      - key: PRODUCT_PITCH
+        value: "RFID + IoT asset tracking and real-time monitoring for healthcare and enterprise operations in UAE."
+      # ---- Frontend URL for CORS (set after first deploy of web service) ----
+      - key: APP_BASE_URL
+        sync: false      # paste in https://outreach-web.onrender.com after first deploy
+
+  # ---------------------------- WEB (Next.js) ----------------------------
+  - type: web
+    name: outreach-web
+    runtime: node
+    plan: free
+    region: frankfurt
+    rootDir: apps/web
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      # Set this after first deploy of outreach-api — paste the full https://... URL
+      - key: NEXT_PUBLIC_API_URL
+        sync: false
+      - key: NODE_ENV
+        value: production
