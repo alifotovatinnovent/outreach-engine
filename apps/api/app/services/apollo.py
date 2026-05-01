@@ -77,10 +77,11 @@ class ApolloClient:
     async def find_organization(self, name: str) -> dict[str, Any] | None:
         """Find the canonical Apollo org for a company name. Returns org dict or None.
 
-        Uses the new mixed_companies/api_search endpoint (the older `search` is deprecated).
+        Note: only the *people* /search was deprecated in late 2024.
+        Companies still use /mixed_companies/search.
         """
         data = await self._post(
-            "/api/v1/mixed_companies/api_search",
+            "/api/v1/mixed_companies/search",
             {"q_organization_name": name, "page": 1, "per_page": 5},
         )
         orgs = (data.get("organizations") or []) + (data.get("accounts") or [])
