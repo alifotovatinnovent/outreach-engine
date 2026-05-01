@@ -97,28 +97,31 @@ async def research_account(db: Session, company_name: str) -> Account:
         db.flush()
 
         # 3) Pull senior leaders
-        log.info("Pulling senior leaders for org %s (%s)", org.get("name"), org.get("id"))
+        # Apollo accounts have BOTH an account ID and an organization_id.
+        # People search needs the organization_id, not the account id.
+        org_id_for_people = org.get("organization_id") or org.get("id")
+        log.info("Pulling senior leaders for org %s (org_id=%s)", org.get("name"), org_id_for_people)
         people = await apollo.search_all_senior_people(
-            organization_id=org["id"],
+            organization_id=org_id_for_people,
             seniorities=DEFAULT_SENIORITIES,
             max_results=200,
         )
-        log.info("Got %d senior leaders", len(people))
+        log.info("Got %d senior leaders from search", len(people))
 
-        # 4) Bulk enrich (gets emails)
-        enrich_input = [
-            {
-                "first_name": p.get("first_name"),
-                "last_name": p.get("last_name"),
-                "organization_name": org.get("name"),
-                "linkedin_url": p.get("linkedin_url"),
-            }
-            for p in people
-            if p.get("first_name") and p.get("last_name")
-        ]
-        enriched = await apollo.bulk_enrich_people(enrich_input, reveal_personal_emails=False)
-        # Index enriched by linkedin_url for merge
-        enriched_by_li = {e.get("linkedin_url"): e for e in enriched if e.get("linkedin_url")}
+        # 4) Bulk enrich by Apollo person ID — search returns obfuscated last names.
+        # The match endpoint accepts {id: "..."} for any Apollo person.
+        enrich_input = [{"id": p["id"]} for p in people if p.get("id")]
+        enriched = []
+        if enrich_input:
+            try:
+                enriched = await apollo.bulk_enrich_people(
+                    enrich_input, reveal_personal_emails=False,
+                )
+                log.info("Enriched %d/%d people", len(enriched), len(enrich_input))
+            except Exception as e:  # noqa: BLE001
+                log.warning("Bulk enrich failed (non-fatal): %s", e)
+        # Index enriched by Apollo person id for merge
+        enriched_by_id = {e.get("id"): e for e in enriched if e.get("id")}
 
         # 5) Persist leads
         existing = {l.apollo_person_id: l for l in account.leads if l.apollo_person_id}
@@ -126,7 +129,15 @@ async def research_account(db: Session, company_name: str) -> Account:
             pid = p.get("id")
             if not pid:
                 continue
-            merged = {**p, **(enriched_by_li.get(p.get("linkedin_url"), {}) or {})}
+            # Merge enrichment data on top of search data
+            enriched = enriched_by_id.get(pid, {}) or {}
+            merged = {**p, **enriched}
+
+            # Pick the best available name: enriched > search-with-real-last > obfuscated
+            first = merged.get("first_name") or ""
+            last = merged.get("last_name") or merged.get("last_name_obfuscated") or ""
+            full_name = f"{first} {last}".strip() or merged.get("name") or "(unknown)"
+
             score = _score_lead(merged, mutual_count=0)
             tier = _tier_from_score(score, mutual_count=0)
             lead = existing.get(pid)
@@ -134,15 +145,17 @@ async def research_account(db: Session, company_name: str) -> Account:
                 lead = Lead(
                     account_id=account.id,
                     apollo_person_id=pid,
-                    full_name=f"{p.get('first_name','')} {p.get('last_name','')}".strip(),
+                    full_name=full_name,
                 )
                 db.add(lead)
+            else:
+                lead.full_name = full_name
             lead.title = merged.get("title")
             lead.seniority = merged.get("seniority")
             lead.department = (merged.get("departments") or [None])[0]
             lead.email = merged.get("email")
             lead.email_status = merged.get("email_status")
-            lead.phone = (merged.get("phone_numbers") or [{}])[0].get("sanitized_number")
+            lead.phone = (merged.get("phone_numbers") or [{}])[0].get("sanitized_number") if merged.get("phone_numbers") else None
             lead.linkedin_url = merged.get("linkedin_url")
             lead.location = ", ".join(filter(None, [
                 merged.get("city"), merged.get("state"), merged.get("country")
@@ -154,6 +167,7 @@ async def research_account(db: Session, company_name: str) -> Account:
                 "headline": merged.get("headline"),
                 "twitter_url": merged.get("twitter_url"),
                 "github_url": merged.get("github_url"),
+                "has_email": bool(merged.get("has_email") or merged.get("email")),
             }
 
         db.commit()
