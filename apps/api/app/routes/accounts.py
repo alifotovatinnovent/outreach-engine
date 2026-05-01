@@ -46,7 +46,20 @@ def list_accounts(db: Session = Depends(get_db)):
 @router.post("", response_model=AccountOut)
 async def create_account(payload: AccountIn, db: Session = Depends(get_db)):
     """Trigger the full intelligence pipeline for a company."""
-    account = await intelligence.research_account(db, payload.company_name)
+    import logging, traceback
+    log = logging.getLogger(__name__)
+    log.info("Researching account: %s", payload.company_name)
+    try:
+        account = await intelligence.research_account(db, payload.company_name)
+    except ValueError as e:
+        # Apollo couldn't resolve the company
+        log.warning("Research failed: %s", e)
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        # Anything else — return the actual error to the dashboard for debug
+        log.error("Research errored: %s\n%s", e, traceback.format_exc())
+        raise HTTPException(500, f"{type(e).__name__}: {str(e)[:300]}")
+    log.info("Researched %s: %d leads", account.name, len(account.leads))
     return _account_out(account)
 
 
