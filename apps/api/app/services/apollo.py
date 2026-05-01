@@ -75,9 +75,12 @@ class ApolloClient:
     # ---------------- Public methods ----------------
 
     async def find_organization(self, name: str) -> dict[str, Any] | None:
-        """Find the canonical Apollo org for a company name. Returns org dict or None."""
+        """Find the canonical Apollo org for a company name. Returns org dict or None.
+
+        Uses the new mixed_companies/api_search endpoint (the older `search` is deprecated).
+        """
         data = await self._post(
-            "/api/v1/mixed_companies/search",
+            "/api/v1/mixed_companies/api_search",
             {"q_organization_name": name, "page": 1, "per_page": 5},
         )
         orgs = (data.get("organizations") or []) + (data.get("accounts") or [])
@@ -115,7 +118,8 @@ class ApolloClient:
         else:
             raise ApolloError("Need organization_id or organization_name")
 
-        return await self._post("/api/v1/mixed_people/search", payload)
+        # New endpoint as of late 2024 — `mixed_people/search` is deprecated (returns 422).
+        return await self._post("/api/v1/mixed_people/api_search", payload)
 
     async def search_all_senior_people(
         self,
